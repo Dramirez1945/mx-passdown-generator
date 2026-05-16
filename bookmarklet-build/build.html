@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>MX Passdown — Bookmarklet Builder</title>
+  <style>
+    body { font-family: system-ui, sans-serif; background: #0d1018; color: #e0e8f0; padding: 40px 24px; max-width: 860px; margin: 0 auto; }
+    h1 { font-size: 22px; font-weight: 700; color: #5eb9ff; margin: 0 0 6px; }
+    p { font-size: 14px; color: rgba(255,255,255,.6); line-height: 1.6; margin: 0 0 20px; }
+    label { display: block; font-size: 12px; letter-spacing: 2px; text-transform: uppercase; color: rgba(255,255,255,.45); margin-bottom: 8px; }
+    textarea {
+      width: 100%; background: rgba(0,0,0,.5); border: 2px solid rgba(94,185,255,.3); color: #cfe8ff;
+      font-family: 'Courier New', monospace; font-size: 12px; line-height: 1.5; padding: 14px 16px;
+      border-radius: 10px; resize: vertical; outline: none; min-height: 220px; box-sizing: border-box;
+    }
+    textarea:focus { border-color: #5eb9ff; }
+    button {
+      background: #5eb9ff; color: #0d1018; border: none; padding: 12px 28px;
+      font-size: 14px; font-weight: 700; border-radius: 8px; cursor: pointer; margin: 16px 0;
+    }
+    button:hover { opacity: .88; }
+    #output-wrap { margin-top: 24px; }
+    #url-out {
+      width: 100%; background: rgba(0,0,0,.5); border: 2px solid rgba(94,185,255,.3); color: #a8d8ff;
+      font-family: 'Courier New', monospace; font-size: 11px; line-height: 1.5; padding: 14px 16px;
+      border-radius: 10px; resize: none; outline: none; min-height: 120px; word-break: break-all;
+      box-sizing: border-box;
+    }
+    .info { font-size: 12px; color: rgba(255,255,255,.4); margin-top: 8px; }
+    .steps { background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.08); border-radius: 10px; padding: 18px 22px; margin-bottom: 28px; }
+    .steps ol { margin: 0; padding-left: 20px; font-size: 14px; color: rgba(255,255,255,.7); line-height: 2; }
+    .steps b { color: #f0f0f0; }
+  </style>
+</head>
+<body>
+
+<h1>MX Passdown — Bookmarklet Builder</h1>
+<p>Encodes the passdown bookmarklet source into a <code>javascript:</code> URL that can be installed as a browser bookmark.</p>
+
+<div class="steps">
+  <ol>
+    <li>Paste the contents of <b>src/passdown/passdownSource.js</b> into the box below</li>
+    <li>Click <b>Build Bookmarklet URL</b></li>
+    <li>Copy the generated URL from the output box</li>
+    <li>Paste it into <b>src/passdown/passdownUrl.js</b> as the value of <code>passdownUrl</code></li>
+  </ol>
+</div>
+
+<label for="source-in">Paste passdownSource.js here</label>
+<textarea id="source-in" spellcheck="false" placeholder="(async function MXPassdown() {&#10;  // paste the full source here&#10;})();"></textarea>
+
+<button onclick="build()">Build Bookmarklet URL</button>
+
+<div id="output-wrap" style="display:none">
+  <label for="url-out">Generated javascript: URL — copy this into passdownUrl.js</label>
+  <textarea id="url-out" readonly spellcheck="false"></textarea>
+  <div class="info" id="url-len"></div>
+  <button onclick="copyUrl()">Copy URL</button>
+</div>
+
+<script>
+function build() {
+  var src = document.getElementById('source-in').value.trim();
+  if (!src) { alert('Paste the source first.'); return; }
+  var encoded = encodeURIComponent(src);
+  var url = 'javascript:' + encoded + 'void 0;';
+  var out = document.getElementById('url-out');
+  out.value = url;
+  document.getElementById('url-len').textContent = 'URL length: ' + url.length.toLocaleString() + ' characters';
+  document.getElementById('output-wrap').style.display = 'block';
+}
+
+function copyUrl() {
+  var out = document.getElementById('url-out');
+  try {
+    navigator.clipboard.writeText(out.value).then(function() { alert('Copied!'); });
+  } catch(e) {
+    out.select();
+    document.execCommand('copy');
+    alert('Copied!');
+  }
+}
+</script>
+</body>
+</html>
