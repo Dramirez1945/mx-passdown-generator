@@ -877,17 +877,36 @@
 
     document.getElementById('__pd_copy_pv').onclick = async function() {
       var btn = this;
+      if (btn.disabled) return;
+      var orig = { html: btn.innerHTML, bg: btn.style.background, bc: btn.style.borderColor, color: btn.style.color };
+
+      btn.disabled = true;
+      btn.innerHTML = '<span style="display:inline-block;width:11px;height:11px;border:2px solid rgba(94,185,255,.3);border-top-color:'+A+';border-radius:50%;animation:__pd_spin 0.8s linear infinite;vertical-align:-1px;margin-right:6px;"></span>Copying…';
+
       var pvVals = capturePvVals(vals);
-      try { await navigator.clipboard.writeText(buildPlainText(pvVals)); }
-      catch(e) {
-        var ta2 = document.createElement('textarea');
-        ta2.value = buildPlainText(pvVals);
-        ta2.style.cssText = 'position:fixed;top:-9999px;';
-        document.body.appendChild(ta2); ta2.select(); document.execCommand('copy'); ta2.remove();
-      }
-      var orig = btn.textContent; btn.textContent = '✓ Copied!';
-      btn.style.background='rgba(74,222,128,.15)'; btn.style.borderColor='#4ade80'; btn.style.color='#4ade80';
-      setTimeout(function(){ btn.textContent=orig; btn.style.background='rgba(94,185,255,.12)'; btn.style.borderColor='rgba(94,185,255,.45)'; btn.style.color=A; }, 2000);
+      var copyPromise = (async function() {
+        try { await navigator.clipboard.writeText(buildPlainText(pvVals)); }
+        catch(e) {
+          var ta2 = document.createElement('textarea');
+          ta2.value = buildPlainText(pvVals);
+          ta2.style.cssText = 'position:fixed;top:-9999px;';
+          document.body.appendChild(ta2); ta2.select(); document.execCommand('copy'); ta2.remove();
+        }
+      })();
+      await Promise.all([copyPromise, new Promise(function(r){ setTimeout(r, 350); })]);
+
+      btn.innerHTML = '✓ Copied!';
+      btn.style.background = 'rgba(74,222,128,.15)';
+      btn.style.borderColor = '#4ade80';
+      btn.style.color = '#4ade80';
+
+      setTimeout(function() {
+        btn.innerHTML = orig.html;
+        btn.style.background = orig.bg;
+        btn.style.borderColor = orig.bc;
+        btn.style.color = orig.color;
+        btn.disabled = false;
+      }, 1500);
     };
 
     document.getElementById('__pd_pdf_pv').onclick = async function() {
