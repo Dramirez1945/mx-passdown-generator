@@ -784,11 +784,12 @@
           // If header + first queued item doesn't fit and page isn't empty, start a new page
           if (curGroup.length && hdrH + queue[0].offsetHeight > rem) closeGroup();
 
-          // Collect items from front of queue that fit
+          // Collect items from front of queue that fit, reserving 12px at the bottom so
+          // the last row isn't clipped by overflow:hidden on the page div
           var taken = [], spaceUsed = hdrH;
           for (var qi = 0; qi < queue.length; qi++) {
             var rh = queue[qi].offsetHeight + 1; // +1 for inter-row border
-            if (spaceUsed + rh > rem && taken.length) break; // stop — but always take at least 1
+            if (spaceUsed + rh > rem - 12 && taken.length) break; // stop — but always take at least 1
             taken.push(queue[qi]);
             spaceUsed += rh;
           }
