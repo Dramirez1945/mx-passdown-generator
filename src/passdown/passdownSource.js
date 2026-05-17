@@ -712,7 +712,7 @@
 
     // Header and footer strings (reused per page in paginateView)
     var headerHtml = '<div id="__pd_header" style="display:flex;align-items:center;gap:16px;margin-bottom:18px;padding-bottom:12px;border-bottom:2.5px solid '+NAVY+';">'
-      + '<img src="'+LOGO_B64+'" style="width:200px;height:auto;flex-shrink:0;" alt="Advanced Air">'
+      + '<img src="'+LOGO_B64+'" style="width:200px;height:60px;object-fit:contain;flex-shrink:0;" alt="Advanced Air">'
       + '<div style="flex:1;text-align:center;">'
       +   '<div style="font-size:15pt;font-weight:700;color:#1a2035;letter-spacing:2px;font-family:Arial,sans-serif;text-transform:uppercase;">MX Passdown Report</div>'
       +   '<div style="font-size:9pt;color:#1a2035;font-family:Arial,sans-serif;margin-top:5px;">Date: '+fmtDisplay(vals.reportDate)+'</div>'
@@ -741,11 +741,19 @@
     // after every append and undoing if it overflows. This avoids all the precision
     // pitfalls of pre-calculation (image load timing, sub-pixel rounding, margin collapsing).
     // Sections containing .__pd_sec_row children split at row boundaries across pages.
-    function paginateView() {
+    async function paginateView() {
+      // Wait for the base64 logo to fully decode before measuring anything — otherwise
+      // the header reports 0/short height during pagination, then grows after, causing
+      // every row below to shift down past the page boundary.
+      var logoImg = docEl.querySelector('img');
+      if (logoImg && typeof logoImg.decode === 'function') {
+        try { await logoImg.decode(); } catch(e) {}
+      }
+
       var allSecs = Array.prototype.slice.call(docEl.querySelectorAll('.__pd_pv_sec'));
       var PAD_TOP = 16, PAD_BOT = 40, PAGE_H = 1056;
-      var SAFETY = 12; // breathing room at bottom of each page
-      var MAX_H = PAGE_H - PAD_TOP - PAD_BOT - SAFETY; // wrap.offsetHeight ceiling = 988
+      var SAFETY = 24; // breathing room at bottom of each page (≈64px including padding-bottom)
+      var MAX_H = PAGE_H - PAD_TOP - PAD_BOT - SAFETY; // wrap.offsetHeight ceiling = 976
       var PAGE_CSS = 'background:#fff;width:816px;height:'+PAGE_H+'px;overflow:hidden;padding:'+PAD_TOP+'px 48px '+PAD_BOT+'px;box-shadow:0 8px 56px rgba(0,0,0,.28);color:#1a2035;font-family:Arial,sans-serif;position:relative;margin:20px auto;box-sizing:border-box;';
       var BODY_OPEN  = 'border-left:1px solid #d0d0d0;border-right:1px solid #d0d0d0;border-top:none;border-bottom:none;border-radius:0;padding:7px 10px;';
       var BODY_CLOSE = 'border-left:1px solid #d0d0d0;border-right:1px solid #d0d0d0;border-top:none;border-bottom:1px solid #d0d0d0;border-radius:0 0 3px 3px;padding:7px 10px;';
