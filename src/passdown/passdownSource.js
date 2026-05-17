@@ -73,6 +73,7 @@
   var reportDateStr = '', endDateStr = '';
   var absences = [], absenceIdSeq = 0;
   var melExpanded = {};
+  var reportDateAbsences = [];
 
   // ── Utilities ──────────────────────────────────────────────────────────────
 
@@ -239,6 +240,7 @@
 
     scheduledMX = []; melData = {}; calendarEntries = []; fetchErrors = [];
     absences = []; absenceIdSeq = 0; melExpanded = {};
+    reportDateAbsences = [];
     var parser = new DOMParser();
     var SKIP_HDR = ['looking for', 'photos', 'maintenance sign', 'mel - category'];
 
@@ -338,7 +340,10 @@
           var title = ev.title || ev.name || '';
           var body  = ev.notes || ev.description || '';
           if (mechNameMatch(title) || mechNameMatch(body)) {
-            calendarEntries.push(title + (body ? ' — ' + body : ''));
+            var entry = title + (body ? ' — ' + body : '');
+            calendarEntries.push(entry);
+            var evDate = (ev.start_date || ev.start || ev.date || '').slice(0,10);
+            if (evDate === reportDate) reportDateAbsences.push(entry);
           }
         });
       }
@@ -588,7 +593,7 @@
         + '</div>';
     }
     function pvSecCollapsed(label) {
-      return '<div style="margin-bottom:8px;background:'+NAVY+';color:rgba(255,255,255,.55);font-size:8px;letter-spacing:2px;text-transform:uppercase;font-weight:600;padding:4px 10px;border-radius:3px;">'+label+' — N/A</div>';
+      return '<div style="margin-bottom:8px;background:'+NAVY+';color:#fff;font-size:8px;letter-spacing:2px;text-transform:uppercase;font-weight:600;padding:4px 10px;border-radius:3px;">'+label+' — N/A</div>';
     }
     function pvTa(id, val, rows) {
       return '<div id="'+id+'" class="pv-field" contenteditable="true" style="min-height:'+(rows||2)*1.4+'em;">'+esc(val)+'</div>';
@@ -601,13 +606,13 @@
     function makeTopo() {
       var rings = [];
       function add(cx,cy,n,r0,dr,ry0,dry,rot) {
-        for(var i=0;i<n;i++) rings.push([cx,cy,r0+i*dr,ry0+i*dry,rot,Math.max(0.06,0.22-i*0.004)]);
+        for(var i=0;i<n;i++) rings.push([cx,cy,r0+i*dr,ry0+i*dry,rot,Math.max(0.03,0.12-i*0.003)]);
       }
       add(570,440,22,32,29,20,18,-20);
       add(105,155,14,26,20,16,13,15);
       add(410,630,9,18,16,12,11,3);
       return '<svg viewBox="0 0 816 1056" preserveAspectRatio="xMidYMid slice" style="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:0;">'
-        +'<g fill="none" stroke="'+NAVY+'" stroke-width="1">'
+        +'<g fill="none" stroke="'+NAVY+'" stroke-width="0.7">'
         +rings.map(function(r){return '<ellipse cx="'+r[0]+'" cy="'+r[1]+'" rx="'+r[2]+'" ry="'+r[3]+'" opacity="'+r[5].toFixed(3)+'" transform="rotate('+r[4]+','+r[0]+','+r[1]+')"/>';}).join('')
         +'</g></svg>';
     }
@@ -625,35 +630,59 @@
 
     var melHdr = 'Open MELs — '+melTotal+(mostRestr.expiry?' | Most Restrictive: '+mostRestr.tail+' EXP '+fmtDate(mostRestr.expiry):'');
 
-    // Scheduled MX — structured rows
-    var mxRows;
-    if (scheduledMX.length) {
-      var rowsHtml = scheduledMX.map(function(r) {
-        return '<div style="display:flex;gap:10px;align-items:baseline;padding:5px 0;border-bottom:1px solid #f0f0f0;font-family:Arial,sans-serif;">'
-          +'<span style="font-size:9pt;font-weight:700;color:'+NAVY+';min-width:72px;flex-shrink:0;">'+esc(r.tail)+'</span>'
-          +'<span style="font-size:8.5pt;color:#374151;flex:1;">'+(r.loc?'MX @ '+esc(r.loc):'')+(r.notes?' &nbsp;|&nbsp; '+esc(r.notes):'')+'</span>'
-          +'</div>';
-      }).join('');
-      mxRows = rowsHtml + '<div id="__pv_mx_detail" class="pv-field" contenteditable="true" style="margin-top:6px;min-height:1.4em;color:#9ca3af;font-size:8pt;">'+esc(vals.mxDetail||'')+'</div>';
-    } else {
-      mxRows = pvTa('__pv_mx_detail', vals.mxDetail||'N/A', 2);
-    }
+    // Scheduled MX — tail # grid (section 2, display only)
+    var cols = scheduledMX.length > 3 ? 3 : 2;
+    var mxGrid = scheduledMX.length
+      ? '<div style="display:grid;grid-template-columns:repeat('+cols+',auto);gap:6px 14px;justify-content:start;">'
+          + scheduledMX.map(function(r){
+              return '<div style="font-size:9.5pt;font-weight:700;color:'+NAVY+';font-family:Arial,sans-serif;">'+esc(r.tail)+'</div>';
+            }).join('')
+          + '</div>'
+      : pvTa('__pv_mx_tails', vals.mxSummary||'N/A', 1);
 
-    var aogCollapsed = !vals.aogCount || vals.aogCount === '0';
-    var wfpCollapsed = !vals.wfpCount || vals.wfpCount === '0';
+    // Scheduled MX Detailed (section 5)
+    var mxDetailRows = scheduledMX.length
+      ? scheduledMX.map(function(r){
+          return '<div style="padding:5px 0;border-bottom:1px solid #f0f0f0;">'
+            +'<span style="font-size:9pt;font-weight:700;color:#1a2035;font-family:Arial,sans-serif;">'+esc(r.tail)+'</span>'
+            +(r.loc||r.notes ? '<span style="font-size:8.5pt;color:#1a2035;font-family:Arial,sans-serif;"> &nbsp;–&nbsp; '+(r.loc?'MX @ '+esc(r.loc):'')+(r.notes?' &nbsp;|&nbsp; '+esc(r.notes):'')+'</span>' : '')
+            +'</div>';
+        }).join('')
+        + pvTa('__pv_mx_detail', vals.mxDetail||'', 2)
+      : pvTa('__pv_mx_detail', vals.mxDetail||'N/A', 2);
 
-    var leftCol = [
+    // MX Coverage — append report-date calendar absences
+    var coverageBase = vals.coverage || STATIC_COVERAGE;
+    var coverageContent = reportDateAbsences.length
+      ? coverageBase + '\n\nNOTE — Calendar absence on ' + fmtDisplay(vals.reportDate) + ':\n'
+          + reportDateAbsences.map(function(e){ return '  • ' + e; }).join('\n')
+      : coverageBase;
+
+    var aogCollapsed  = !vals.aogCount || vals.aogCount === '0';
+    var wfpCollapsed  = !vals.wfpCount || vals.wfpCount === '0';
+    var tmrwCollapsed = !vals.tomorrow || vals.tomorrow.trim() === '';
+    var lowCollapsed  = !vals.lowHours || vals.lowHours.trim() === '' || vals.lowHours.trim().toLowerCase() === 'n/a';
+
+    var sections = [
+      // 1. AOG Aircraft
       aogCollapsed ? pvSecCollapsed('AOG Aircraft — 0') : pvSec('AOG Aircraft — '+vals.aogCount, pvTa('__pv_aog', vals.aogTails||'N/A', 2)),
+      // 2. Scheduled MX (tail grid)
+      pvSec('Scheduled MX', mxGrid),
+      // 3. Open MELs
       pvSec(melHdr, pvTa('__pv_mel', melBodyText, Math.max(2, melTails.length*2+1))),
+      // 4. Waiting for Parts
       wfpCollapsed ? pvSecCollapsed('Waiting for Parts — 0') : pvSec('Waiting for Parts — '+vals.wfpCount, pvTa('__pv_wfp', vals.wfpText||'N/A', 2)),
-    ].join('');
-
-    var rightCol = [
-      pvSec('MX Beginning Tomorrow', pvTa('__pv_tomorrow', vals.tomorrow||'N/A', 3)),
-      pvSec('Aircraft Low Hours / Low Landings', pvInp('__pv_low_hours', vals.lowHours||'N/A')),
-      pvSec('MX Coverage', pvTa('__pv_coverage', vals.coverage||STATIC_COVERAGE, 7)),
-      (vals.calendar ? pvSec('Calendar Absences', pvTa('__pv_calendar', vals.calendar, Math.max(2, calendarEntries.length+1))) : ''),
+      // 5. Scheduled MX Detailed
+      pvSec('Scheduled MX — Detail', mxDetailRows),
+      // 6. MX Beginning Tomorrow
+      tmrwCollapsed ? pvSecCollapsed('MX Beginning Tomorrow') : pvSec('MX Beginning Tomorrow', pvTa('__pv_tomorrow', vals.tomorrow, 3)),
+      // 7. Aircraft Low Hours / Low Landings
+      lowCollapsed ? pvSecCollapsed('Aircraft Low Hours / Low Landings') : pvSec('Aircraft Low Hours / Low Landings', pvInp('__pv_low_hours', vals.lowHours)),
+      // 8. MX Coverage
+      pvSec('MX Coverage', pvTa('__pv_coverage', coverageContent, 8)),
+      // Pop-up Absences (only if present)
       (absLines.length ? pvSec('Pop-up Absences', pvTa('__pv_absences', absLines.join('\n'), Math.max(2, absLines.length))) : ''),
+      // Notes (only if present)
       (vals.notes ? pvSec('Notes', pvTa('__pv_notes', vals.notes, 3)) : ''),
     ].join('');
 
@@ -680,12 +709,9 @@
       +   '<div style="font-size:8.5pt;color:#6b7280;letter-spacing:3px;text-transform:uppercase;margin:0 0 6px;font-family:Arial,sans-serif;">MX Passdown Report</div>'
       +   '<div style="font-size:8.5pt;color:#4b5563;font-family:Arial,sans-serif;">Date: '+fmtDisplay(vals.reportDate)+' &nbsp;|&nbsp; Generated: '+zuluNow()+'</div>'
       + '</div>'
-      + pvSec('Scheduled MX', mxRows)
-      + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:start;margin-top:2px;">'
-      +   '<div>'+leftCol+'</div>'
-      +   '<div>'+rightCol+'</div>'
-      + '</div>'
-      + '<div style="margin-top:18px;padding-top:8px;border-top:1px solid #e2e8f0;font-size:7.5pt;color:#94a3b8;text-align:center;letter-spacing:1px;font-family:Arial,sans-serif;">AAL, LLC — INTERNAL USE ONLY &nbsp;|&nbsp; '+fmtDisplay(vals.reportDate)+'</div>'
+      + sections
+      + '<div style="margin-top:10px;padding:7px 10px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:3px;font-family:Arial,sans-serif;font-size:7.5pt;color:#6b7280;text-align:center;letter-spacing:0.5px;">*NOTE: Information here is intended as an update and can change at any point in the evening.</div>'
+      + '<div style="margin-top:8px;padding-top:6px;border-top:1px solid #e2e8f0;font-size:7.5pt;color:#94a3b8;text-align:center;letter-spacing:1px;font-family:Arial,sans-serif;">AAL, LLC — INTERNAL USE ONLY &nbsp;|&nbsp; '+fmtDisplay(vals.reportDate)+'</div>'
       + '</div>';
 
     ov.appendChild(toolbar);
