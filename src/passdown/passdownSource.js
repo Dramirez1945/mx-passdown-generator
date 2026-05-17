@@ -737,122 +737,127 @@
     ov.appendChild(toolbar);
     ov.appendChild(docEl);
 
-    // Measure section heights then redistribute into 816×1056 page divs
-    // Sections with .__pd_sec_row children split at row boundaries across pages.
+    // Iteratively place each section into pages, measuring the live wrap.offsetHeight
+    // after every append and undoing if it overflows. This avoids all the precision
+    // pitfalls of pre-calculation (image load timing, sub-pixel rounding, margin collapsing).
+    // Sections containing .__pd_sec_row children split at row boundaries across pages.
     function paginateView() {
       var allSecs = Array.prototype.slice.call(docEl.querySelectorAll('.__pd_pv_sec'));
-      var headerEl = docEl.querySelector('#__pd_header');
       var PAD_TOP = 16, PAD_BOT = 40, PAGE_H = 1056;
-      var innerAvail = PAGE_H - PAD_TOP - PAD_BOT; // 1000
-      var firstAvail = innerAvail - (headerEl ? headerEl.offsetHeight + 18 : 0);
+      var SAFETY = 12; // breathing room at bottom of each page
+      var MAX_H = PAGE_H - PAD_TOP - PAD_BOT - SAFETY; // wrap.offsetHeight ceiling = 988
+      var PAGE_CSS = 'background:#fff;width:816px;height:'+PAGE_H+'px;overflow:hidden;padding:'+PAD_TOP+'px 48px '+PAD_BOT+'px;box-shadow:0 8px 56px rgba(0,0,0,.28);color:#1a2035;font-family:Arial,sans-serif;position:relative;margin:20px auto;box-sizing:border-box;';
+      var BODY_OPEN  = 'border-left:1px solid #d0d0d0;border-right:1px solid #d0d0d0;border-top:none;border-bottom:none;border-radius:0;padding:7px 10px;';
+      var BODY_CLOSE = 'border-left:1px solid #d0d0d0;border-right:1px solid #d0d0d0;border-top:none;border-bottom:1px solid #d0d0d0;border-radius:0 0 3px 3px;padding:7px 10px;';
 
-      // Build items: atomic sections stay whole; splittable sections decompose into hdr+rows+tail
-      var items = [];
+      // Flatten sections into a stream of placeable units
+      var units = [];
       allSecs.forEach(function(sec) {
         var rows = Array.prototype.slice.call(sec.querySelectorAll('.__pd_sec_row'));
         if (!rows.length) {
-          items.push({ type: 'atomic', node: sec, h: sec.offsetHeight + 11 });
+          units.push({ kind: 'atomic', node: sec });
         } else {
-          items.push({
-            type: 'split',
-            hdrEl: sec.firstElementChild,
-            rows: rows,
-            tail: sec.querySelector('.__pd_sec_tail') || null
-          });
+          units.push({ kind: 'hdr', node: sec.firstElementChild, sec: sec });
+          rows.forEach(function(r) { units.push({ kind: 'row', node: r, sec: sec }); });
+          var tail = sec.querySelector('.__pd_sec_tail');
+          if (tail) units.push({ kind: 'row', node: tail, sec: sec });
         }
       });
 
-      // Distribute items into page groups (each group = array of placed chunks)
-      var pageGroups = [], curGroup = [], rem = firstAvail;
-
-      function closeGroup() { if (curGroup.length) { pageGroups.push(curGroup); curGroup = []; rem = innerAvail; } }
-
-      items.forEach(function(item) {
-        if (item.type === 'atomic') {
-          if (item.h > rem && curGroup.length) closeGroup();
-          curGroup.push({ type: 'atomic', node: item.node });
-          rem -= item.h;
-          return;
-        }
-        // Splittable — queue = rows + optional tail (treated as last row)
-        var queue = item.rows.slice();
-        if (item.tail) queue.push(item.tail);
-        var isFirst = true;
-
-        while (queue.length) {
-          var hdrH = isFirst ? item.hdrEl.offsetHeight + 2 : 0;
-          var BODY_PAD = 14; // body div padding: 7px top + 7px bottom (not in offsetHeight)
-          var SAFE = 10;     // extra breathing room so overflow:hidden never clips the last row
-          // If header + body overhead + first queued item doesn't fit and page isn't empty, start a new page
-          if (curGroup.length && hdrH + BODY_PAD + queue[0].offsetHeight > rem - SAFE) closeGroup();
-
-          // Collect items from front of queue that fit
-          var taken = [], spaceUsed = hdrH + BODY_PAD;
-          for (var qi = 0; qi < queue.length; qi++) {
-            var rh = queue[qi].offsetHeight + 1; // +1 for inter-row border
-            if (spaceUsed + rh > rem - SAFE && taken.length) break; // stop — but always take at least 1
-            taken.push(queue[qi]);
-            spaceUsed += rh;
-          }
-          if (!taken.length) { taken.push(queue[0]); spaceUsed += queue[0].offsetHeight + 1; } // safety: take 1 even if oversized
-          queue.splice(0, taken.length);
-
-          var isLast = (queue.length === 0);
-          var tailNode = null;
-          if (isLast && item.tail && taken[taken.length - 1] === item.tail) {
-            tailNode = taken.pop(); // separate tail from rows for clean DOM assembly
-          }
-
-          curGroup.push({ type: 'chunk', isFirst: isFirst, isLast: isLast, hdrEl: isFirst ? item.hdrEl : null, rows: taken, tail: tailNode });
-          rem -= spaceUsed;
-          isFirst = false;
-          if (!isLast) closeGroup();
-        }
-      });
-      if (curGroup.length) pageGroups.push(curGroup);
-
-      // Build page DOM
-      var PAGE_CSS = 'background:#fff;width:816px;height:'+PAGE_H+'px;overflow:hidden;padding:'+PAD_TOP+'px 48px '+PAD_BOT+'px;box-shadow:0 8px 56px rgba(0,0,0,.28);color:#1a2035;font-family:Arial,sans-serif;position:relative;margin:20px auto;box-sizing:border-box;';
-
-      var pages = pageGroups.map(function(grp, p) {
+      var pages = [];
+      function newPage() {
         var pg = document.createElement('div');
         pg.className = '__pd_page';
         pg.style.cssText = PAGE_CSS;
         pg.innerHTML = makeTopo();
         var wrap = document.createElement('div');
         wrap.style.cssText = 'position:relative;z-index:1;';
-        if (p === 0) wrap.insertAdjacentHTML('beforeend', headerHtml);
-
-        grp.forEach(function(chunk) {
-          if (chunk.type === 'atomic') {
-            wrap.appendChild(chunk.node);
-            return;
-          }
-          // Reconstruct section element with appropriate borders
-          var outer = document.createElement('div');
-          outer.className = '__pd_pv_sec';
-          outer.style.marginBottom = chunk.isLast ? '11px' : '0';
-          if (chunk.hdrEl) outer.appendChild(chunk.hdrEl);
-
-          var bodyDiv = document.createElement('div');
-          bodyDiv.style.cssText = 'border-left:1px solid #d0d0d0;border-right:1px solid #d0d0d0;border-top:none;'
-            + 'border-bottom:' + (chunk.isLast ? '1px solid #d0d0d0' : 'none') + ';'
-            + 'border-radius:' + (chunk.isLast ? '0 0 3px 3px' : '0') + ';'
-            + 'padding:7px 10px;';
-          chunk.rows.forEach(function(r) { bodyDiv.appendChild(r); });
-          if (chunk.tail) bodyDiv.appendChild(chunk.tail);
-          outer.appendChild(bodyDiv);
-          wrap.appendChild(outer);
-        });
-
-        if (p === pageGroups.length - 1) wrap.insertAdjacentHTML('beforeend', tailHtml);
         pg.appendChild(wrap);
-        return pg;
-      });
+        ov.insertBefore(pg, docEl); // pages stack above the hidden docEl
+        var pageObj = { pg: pg, wrap: wrap, openOuter: null, openBody: null, openSec: null };
+        pages.push(pageObj);
+        return pageObj;
+      }
+      function openSec(page, hdrNode, sec) {
+        var outer = document.createElement('div');
+        outer.className = '__pd_pv_sec';
+        outer.style.marginBottom = '0';
+        if (hdrNode) outer.appendChild(hdrNode);
+        var body = document.createElement('div');
+        body.style.cssText = BODY_OPEN;
+        outer.appendChild(body);
+        page.wrap.appendChild(outer);
+        page.openOuter = outer; page.openBody = body; page.openSec = sec;
+      }
+      function closeSec(page) {
+        if (!page.openBody) return;
+        page.openBody.style.cssText = BODY_CLOSE;
+        page.openOuter.style.marginBottom = '11px';
+        page.openOuter = null; page.openBody = null; page.openSec = null;
+      }
+      function fits(page) { return page.wrap.offsetHeight <= MAX_H; }
+      function hasContent(page) {
+        var min = (page === pages[0]) ? 1 : 0; // first page has the inserted headerHtml block
+        return page.wrap.children.length > min;
+      }
+
+      var current = newPage();
+      current.wrap.insertAdjacentHTML('beforeend', headerHtml);
+
+      for (var i = 0; i < units.length; i++) {
+        var u = units[i];
+
+        if (u.kind === 'atomic') {
+          var hadContent = hasContent(current);
+          current.wrap.appendChild(u.node);
+          if (!fits(current) && hadContent) {
+            current.wrap.removeChild(u.node);
+            current = newPage();
+            current.wrap.appendChild(u.node);
+          }
+          continue;
+        }
+
+        if (u.kind === 'hdr') {
+          var hadContent2 = hasContent(current);
+          openSec(current, u.node, u.sec);
+          if (!fits(current) && hadContent2) {
+            current.wrap.removeChild(current.openOuter);
+            current.openOuter = null; current.openBody = null; current.openSec = null;
+            current = newPage();
+            openSec(current, u.node, u.sec);
+          }
+          continue;
+        }
+
+        // u.kind === 'row'
+        if (current.openSec !== u.sec) openSec(current, null, u.sec);
+        current.openBody.appendChild(u.node);
+        if (!fits(current)) {
+          current.openBody.removeChild(u.node);
+          var savedHdr = null;
+          var bodyEmpty = current.openBody.children.length === 0;
+          if (bodyEmpty && current.openOuter.firstElementChild !== current.openBody) {
+            savedHdr = current.openOuter.firstElementChild; // preserve header to move along with row
+          }
+          if (bodyEmpty) {
+            current.wrap.removeChild(current.openOuter);
+            current.openOuter = null; current.openBody = null; current.openSec = null;
+          }
+          current = newPage();
+          openSec(current, savedHdr, u.sec);
+          current.openBody.appendChild(u.node);
+        }
+
+        var nextU = units[i + 1];
+        var isLastOfSec = !nextU || nextU.kind !== 'row' || nextU.sec !== u.sec;
+        if (isLastOfSec) closeSec(current);
+      }
+
+      // Append tail (disclaimer + footer) to whichever page is last
+      current.wrap.insertAdjacentHTML('beforeend', tailHtml);
 
       ov.removeChild(docEl);
-      var ref = toolbar.nextSibling;
-      pages.forEach(function(pg) { ov.insertBefore(pg, ref); ref = pg.nextSibling; });
       ov.scrollTop = 0;
     }
     paginateView();
