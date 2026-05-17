@@ -88,10 +88,16 @@
     return (h<10?'0':'')+h+(m2<10?'0':'')+m2+'Z';
   }
 
-  async function fetchJSON(url) {
-    var r = await fetch(url, { credentials: 'include' });
-    if (!r.ok) throw new Error(r.status + ' ' + url);
-    return r.json();
+  // getField: extract JetInsight label→value (copied from working mx-report bookmarklet)
+  function getField(doc, label) {
+    var v = '';
+    doc.querySelectorAll('div').forEach(function(d) {
+      if (d.children.length === 0 && d.textContent.trim() === label) {
+        var ns = d.nextElementSibling;
+        v = ns ? ns.textContent.trim() : '';
+      }
+    });
+    return v;
   }
 
   // ── Overlay skeleton ───────────────────────────────────────────────────────
@@ -120,92 +126,122 @@
   ].join('');
   document.head.appendChild(style);
 
-  // Loading state
-  ov.innerHTML = '<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;gap:16px;">'
+  // Loading state with progress log
+  ov.innerHTML = '<div id="__pd_load" style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;gap:16px;">'
     + '<div style="width:44px;height:44px;border:3px solid rgba(94,185,255,.2);border-top-color:'+A+';border-radius:50%;animation:__pd_spin 0.8s linear infinite;"></div>'
-    + '<div style="font-size:14px;color:rgba(255,255,255,.6);font-family:'+SANS+'">Loading JetInsight data…</div>'
+    + '<div id="__pd_log" style="font-size:13px;color:rgba(255,255,255,.55);font-family:'+SANS+';text-align:center;line-height:2;"></div>'
     + '</div>';
   var spinStyle = document.createElement('style');
   spinStyle.textContent = '@keyframes __pd_spin{to{transform:rotate(360deg)}}';
   document.head.appendChild(spinStyle);
 
-  // ── Data fetching ──────────────────────────────────────────────────────────
+  function log(msg) {
+    var el = document.getElementById('__pd_log');
+    if (el) el.innerHTML += '<div>▸ ' + msg + '</div>';
+  }
+
+  // ── Data fetching (correct JetInsight API — mirrors mx-report/bookmarklet.js) ──
 
   var today = todayStr(), tomorrow = tomorrowStr();
   var scheduledMX = [], melData = {}, calendarEntries = [], fetchErrors = [];
+  var parser = new DOMParser();
 
+  // Priming call (same warm-up as working bookmarklet)
+  await fetch('/compliance/aircraft_readiness', { credentials: 'include' }).catch(function() {});
+
+  // 1. Schedule — response is a direct JSON array
   try {
-    var schedData = await fetchJSON('/schedule/aircraft.json?start='+today+'&end='+tomorrow+'&time_zone=America/Los_Angeles');
-    var events = Array.isArray(schedData) ? schedData : (schedData.events || schedData.data || []);
-    events.forEach(function(ev) {
-      var typeName = (ev.event_type_name || ev.type || '').toLowerCase();
-      if (!typeName.includes('maintenance') && !typeName.includes('mx')) return;
-      var tail = ev.tail_number || ev.aircraft || ev.registration || '';
-      var loc  = ev.location || ev.station || ev.airport || '';
-      var notes = ev.notes || ev.description || ev.memo || '';
-      if (tail) scheduledMX.push({ tail: tail.trim(), loc: loc.trim(), notes: notes.trim() });
+    log('Fetching schedule…');
+    var schedResp = await fetch(
+      '/schedule/aircraft.json?start=' + today + '&end=' + tomorrow + '&time_zone=America%2FLos_Angeles',
+      { credentials: 'include' }
+    );
+    var sched = await schedResp.json();
+    sched.forEach(function(e) {
+      var type = (e.extendedProps && e.extendedProps.event_type_name) || '';
+      if (type !== 'Maintenance') return;
+      var tail  = (e.extendedProps && e.extendedProps.aircraft) || '';
+      var loc   = (e.extendedProps && e.extendedProps.origin_short)
+               || (e.extendedProps && e.extendedProps.destination_short) || '';
+      var notes = ((e.extendedProps && e.extendedProps.notes) || '').trim().replace(/\n/g, ' ');
+      if (tail) scheduledMX.push({ tail: tail.trim(), loc: loc.trim(), notes: notes });
     });
+    log('Schedule: ' + scheduledMX.length + ' MX event' + (scheduledMX.length !== 1 ? 's' : '') + ' found');
   } catch(e) {
     fetchErrors.push('Schedule: ' + e.message);
+    log('Schedule fetch failed');
   }
 
-  // MEL fetch — one per unique tail in scheduled MX
+  // Unique tails from scheduled MX
   var tails = [];
   scheduledMX.forEach(function(r) { if (r.tail && !tails.includes(r.tail)) tails.push(r.tail); });
 
-  await Promise.all(tails.map(async function(tail) {
+  // 2. MELs — sequential per tail, fetch each deferral detail page for expiry date
+  for (var ti = 0; ti < tails.length; ti++) {
+    var tail2 = tails[ti];
     try {
-      var url = '/compliance/discrepancies/index_discrepancies_by_aircraft?aircraft='+encodeURIComponent(tail)+'&per_page=500';
-      var resp = await fetch(url, { credentials: 'include' });
-      var html = await resp.text();
-      var dp = new DOMParser();
-      var doc = dp.parseFromString(html, 'text/html');
-      var rows = doc.querySelectorAll('tr');
-      var count = 0, earliest = null;
-      rows.forEach(function(row) {
-        var rowText = row.textContent || '';
-        if (!rowText.toLowerCase().includes('defer')) return;
-        count++;
-        var cells = row.querySelectorAll('td');
-        cells.forEach(function(cell) {
-          var txt = cell.textContent.trim();
-          var dm = txt.match(/(\d{1,2}\/\d{1,2}(?:\/\d{2,4})?|\d{4}-\d{2}-\d{2})/);
-          if (dm) {
-            var d = parseExpiry(dm[1]);
-            if (d && (!earliest || d < earliest)) earliest = d;
-          }
-        });
+      log('Scanning MELs: ' + tail2 + '…');
+      var disHtml = await fetch(
+        '/compliance/discrepancies/index_discrepancies_by_aircraft?aircraft=' + encodeURIComponent(tail2) + '&per_page=500',
+        { credentials: 'include' }
+      ).then(function(r) { return r.text(); });
+      var disDoc = parser.parseFromString(disHtml, 'text/html');
+
+      // Find rows where last <td> is exactly "Deferred"
+      var deferrals = [];
+      disDoc.querySelectorAll('tbody tr').forEach(function(row) {
+        var tds = Array.from(row.querySelectorAll('td'));
+        if (!tds.length) return;
+        if (tds[tds.length - 1].textContent.trim() === 'Deferred') {
+          var a = row.querySelector('a');
+          if (a) deferrals.push({
+            href: a.href || (window.location.origin + a.getAttribute('href')),
+            id: a.textContent.trim()
+          });
+        }
       });
-      // Fallback: count table rows that mention MEL or deferred
-      if (count === 0) {
-        var melRows = Array.from(rows).filter(function(r) {
-          var t = (r.textContent||'').toLowerCase();
-          return t.includes('mel') || t.includes('deferred') || t.includes('defer');
-        });
-        count = melRows.length;
+
+      // Fetch each deferral detail page for the expiry date
+      var defs = [];
+      for (var di = 0; di < deferrals.length; di++) {
+        try {
+          var dh = await fetch(deferrals[di].href, { credentials: 'include' }).then(function(r) { return r.text(); });
+          var dd = parser.parseFromString(dh, 'text/html');
+          var expStr = getField(dd, 'Deferral expiration date');
+          defs.push({ id: deferrals[di].id, expiry: parseExpiry(expStr) });
+        } catch(e2) { /* skip unreachable detail pages */ }
       }
-      if (count > 0 || earliest) {
-        melData[tail] = { count: count, expiry: earliest };
+
+      if (deferrals.length > 0) {
+        var earliest = defs.reduce(function(min, d) {
+          return d.expiry && (!min || d.expiry < min) ? d.expiry : min;
+        }, null);
+        melData[tail2] = { count: deferrals.length, expiry: earliest };
       }
     } catch(e) {
-      fetchErrors.push('MEL '+tail+': '+e.message);
+      fetchErrors.push('MEL ' + tail2 + ': ' + e.message);
     }
-  }));
-
-  // General calendar (best-effort)
-  try {
-    var calData = await fetchJSON('/schedule/general.json?start='+today+'&end='+tomorrow);
-    var calEvents = Array.isArray(calData) ? calData : (calData.events || calData.data || []);
-    calEvents.forEach(function(ev) {
-      var title = ev.title || ev.name || ev.description || '';
-      var body  = ev.notes || ev.body || '';
-      if (mechNameMatch(title) || mechNameMatch(body)) {
-        calendarEntries.push(title + (body ? ' — ' + body : ''));
-      }
-    });
-  } catch(e) {
-    // 404 or auth error — calendar stays empty, manual entry only
   }
+
+  // 3. General calendar — best-effort, may 404
+  try {
+    log('Checking mechanic calendar…');
+    var calResp = await fetch(
+      '/schedule/general.json?start=' + today + '&end=' + tomorrow,
+      { credentials: 'include' }
+    );
+    if (calResp.ok) {
+      var calArr = await calResp.json();
+      if (!Array.isArray(calArr)) calArr = calArr.events || calArr.data || [];
+      calArr.forEach(function(ev) {
+        var title = ev.title || ev.name || '';
+        var body  = ev.notes || ev.description || '';
+        if (mechNameMatch(title) || mechNameMatch(body)) {
+          calendarEntries.push(title + (body ? ' — ' + body : ''));
+        }
+      });
+    }
+  } catch(e) { /* calendar stays empty — manual entry only */ }
 
   // ── Build editor UI ────────────────────────────────────────────────────────
 
