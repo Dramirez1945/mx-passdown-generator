@@ -712,7 +712,7 @@
 
     // Header and footer strings (reused per page in paginateView)
     var headerHtml = '<div id="__pd_header" style="display:flex;align-items:center;gap:16px;margin-bottom:18px;padding-bottom:12px;border-bottom:2.5px solid '+NAVY+';">'
-      + '<img src="'+LOGO_B64+'" style="width:200px;height:60px;object-fit:contain;flex-shrink:0;" alt="Advanced Air">'
+      + '<img src="'+LOGO_B64+'" style="width:60px;height:60px;flex-shrink:0;" alt="Advanced Air">'
       + '<div style="flex:1;text-align:center;">'
       +   '<div style="font-size:15pt;font-weight:700;color:#1a2035;letter-spacing:2px;font-family:Arial,sans-serif;text-transform:uppercase;">MX Passdown Report</div>'
       +   '<div style="font-size:9pt;color:#1a2035;font-family:Arial,sans-serif;margin-top:5px;">Date: '+fmtDisplay(vals.reportDate)+'</div>'
