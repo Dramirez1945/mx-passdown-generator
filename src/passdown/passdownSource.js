@@ -626,12 +626,17 @@
         +'</g></svg>';
     }
 
-    var melBodyText = melTails.length
+    var melRows = melTails.length
       ? melTails.map(function(t) {
           var m = melData[t], days = daysUntil(m.expiry), expStr = m.expiry ? fmtDate(m.expiry) : '';
-          return t + ' — ' + m.count + ' MEL'+(m.count!==1?'s':'')+(expStr ? ' | '+(days<=MEL_WARN_DAYS?'⚠ ':'')+' EXP '+expStr : '');
-        }).join('\n') + (vals.melNotes ? '\n'+vals.melNotes : '')
-      : (vals.melNotes || 'None');
+          var warn = expStr && days <= MEL_WARN_DAYS ? '⚠ ' : '';
+          return '<div class="__pd_sec_row" style="padding:4px 0;border-bottom:1px solid #f0f0f0;font-size:8.5pt;font-family:Arial,sans-serif;color:#1a2035;">'
+            + esc(t) + ' — ' + m.count + ' MEL'+(m.count!==1?'s':'')
+            + (expStr ? ' | '+warn+'EXP '+expStr : '')
+            + '</div>';
+        }).join('')
+        + '<div id="__pv_mel_notes" class="pv-field __pd_sec_tail" contenteditable="true" style="min-height:1.4em;margin-top:3px;">'+esc(vals.melNotes||'')+'</div>'
+      : null;
 
     var absLines = vals.absences.filter(function(a){ return a.name||a.dates; }).map(function(a) {
       return (a.name||'?')+(a.dates?' — '+a.dates:'')+(a.note?' ('+a.note+')':'');
@@ -651,12 +656,12 @@
     // Scheduled MX Detailed (section 5)
     var mxDetailRows = scheduledMX.length
       ? scheduledMX.map(function(r){
-          return '<div style="padding:5px 0;border-bottom:1px solid #f0f0f0;">'
+          return '<div class="__pd_sec_row" style="padding:5px 0;border-bottom:1px solid #f0f0f0;">'
             +'<span style="font-size:9pt;font-weight:700;color:#1a2035;font-family:Arial,sans-serif;">'+esc(r.tail)+'</span>'
             +(r.loc||r.notes ? '<span style="font-size:8.5pt;color:#1a2035;font-family:Arial,sans-serif;"> &nbsp;–&nbsp; '+(r.loc?'MX @ '+esc(r.loc):'')+(r.notes?' &nbsp;|&nbsp; '+esc(r.notes):'')+'</span>' : '')
             +'</div>';
         }).join('')
-        + '<div id="__pv_mx_detail" class="pv-field" contenteditable="true" style="min-height:1em;margin-top:4px;"></div>'
+        + '<div id="__pv_mx_detail" class="pv-field __pd_sec_tail" contenteditable="true" style="min-height:1em;margin-top:4px;"></div>'
       : pvTa('__pv_mx_detail', vals.mxDetail||'N/A', 2);
 
     // MX Coverage — append report-date calendar absences
@@ -677,7 +682,7 @@
       // 2. Scheduled MX (tail grid)
       pvSec('Scheduled MX' + (scheduledMX.length ? ' — ' + scheduledMX.length : ''), mxGrid),
       // 3. Open MELs
-      pvSec(melHdr, pvTa('__pv_mel', melBodyText, Math.max(2, melTails.length*2+1))),
+      pvSec(melHdr, melRows || pvTa('__pv_mel', vals.melNotes||'None', 2)),
       // 4. Waiting for Parts
       wfpCollapsed ? pvSecCollapsed('Waiting for Parts — 0') : pvSec('Waiting for Parts — '+vals.wfpCount, pvTa('__pv_wfp', vals.wfpText||'N/A', 2)),
       // 5. Scheduled MX Detailed
@@ -733,6 +738,7 @@
     ov.appendChild(docEl);
 
     // Measure section heights then redistribute into 816×1056 page divs
+    // Sections with .__pd_sec_row children split at row boundaries across pages.
     function paginateView() {
       var allSecs = Array.prototype.slice.call(docEl.querySelectorAll('.__pd_pv_sec'));
       var headerEl = docEl.querySelector('#__pd_header');
@@ -740,24 +746,103 @@
       var innerAvail = PAGE_H - PAD_TOP - PAD_BOT; // 1000
       var firstAvail = innerAvail - (headerEl ? headerEl.offsetHeight + 18 : 0);
 
-      var pageGroups = [], group = [], rem = firstAvail;
-      for (var i = 0; i < allSecs.length; i++) {
-        var h = allSecs[i].offsetHeight + 11; // +11 for margin-bottom
-        if (group.length && rem < h) {
-          pageGroups.push(group); group = [i]; rem = innerAvail - h;
-        } else { group.push(i); rem -= h; }
-      }
-      if (group.length) pageGroups.push(group);
+      // Build items: atomic sections stay whole; splittable sections decompose into hdr+rows+tail
+      var items = [];
+      allSecs.forEach(function(sec) {
+        var rows = Array.prototype.slice.call(sec.querySelectorAll('.__pd_sec_row'));
+        if (!rows.length) {
+          items.push({ type: 'atomic', node: sec, h: sec.offsetHeight + 11 });
+        } else {
+          items.push({
+            type: 'split',
+            hdrEl: sec.firstElementChild,
+            rows: rows,
+            tail: sec.querySelector('.__pd_sec_tail') || null
+          });
+        }
+      });
+
+      // Distribute items into page groups (each group = array of placed chunks)
+      var pageGroups = [], curGroup = [], rem = firstAvail;
+
+      function closeGroup() { if (curGroup.length) { pageGroups.push(curGroup); curGroup = []; rem = innerAvail; } }
+
+      items.forEach(function(item) {
+        if (item.type === 'atomic') {
+          if (item.h > rem && curGroup.length) closeGroup();
+          curGroup.push({ type: 'atomic', node: item.node });
+          rem -= item.h;
+          return;
+        }
+        // Splittable — queue = rows + optional tail (treated as last row)
+        var queue = item.rows.slice();
+        if (item.tail) queue.push(item.tail);
+        var isFirst = true;
+
+        while (queue.length) {
+          var hdrH = isFirst ? item.hdrEl.offsetHeight + 2 : 0;
+          // If header + first queued item doesn't fit and page isn't empty, start a new page
+          if (curGroup.length && hdrH + queue[0].offsetHeight > rem) closeGroup();
+
+          // Collect items from front of queue that fit
+          var taken = [], spaceUsed = hdrH;
+          for (var qi = 0; qi < queue.length; qi++) {
+            var rh = queue[qi].offsetHeight + 1; // +1 for inter-row border
+            if (spaceUsed + rh > rem && taken.length) break; // stop — but always take at least 1
+            taken.push(queue[qi]);
+            spaceUsed += rh;
+          }
+          if (!taken.length) { taken.push(queue[0]); spaceUsed += queue[0].offsetHeight + 1; } // safety: take 1 even if oversized
+          queue.splice(0, taken.length);
+
+          var isLast = (queue.length === 0);
+          var tailNode = null;
+          if (isLast && item.tail && taken[taken.length - 1] === item.tail) {
+            tailNode = taken.pop(); // separate tail from rows for clean DOM assembly
+          }
+
+          curGroup.push({ type: 'chunk', isFirst: isFirst, isLast: isLast, hdrEl: isFirst ? item.hdrEl : null, rows: taken, tail: tailNode });
+          rem -= spaceUsed;
+          isFirst = false;
+          if (!isLast) closeGroup();
+        }
+      });
+      if (curGroup.length) pageGroups.push(curGroup);
+
+      // Build page DOM
+      var PAGE_CSS = 'background:#fff;width:816px;height:'+PAGE_H+'px;overflow:hidden;padding:'+PAD_TOP+'px 48px '+PAD_BOT+'px;box-shadow:0 8px 56px rgba(0,0,0,.28);color:#1a2035;font-family:Arial,sans-serif;position:relative;margin:20px auto;box-sizing:border-box;';
 
       var pages = pageGroups.map(function(grp, p) {
         var pg = document.createElement('div');
         pg.className = '__pd_page';
-        pg.style.cssText = 'background:#fff;width:816px;height:1056px;overflow:hidden;padding:'+PAD_TOP+'px 48px '+PAD_BOT+'px;box-shadow:0 8px 56px rgba(0,0,0,.28);color:#1a2035;font-family:Arial,sans-serif;position:relative;margin:20px auto;box-sizing:border-box;';
+        pg.style.cssText = PAGE_CSS;
         pg.innerHTML = makeTopo();
         var wrap = document.createElement('div');
         wrap.style.cssText = 'position:relative;z-index:1;';
         if (p === 0) wrap.insertAdjacentHTML('beforeend', headerHtml);
-        grp.forEach(function(idx) { wrap.appendChild(allSecs[idx]); });
+
+        grp.forEach(function(chunk) {
+          if (chunk.type === 'atomic') {
+            wrap.appendChild(chunk.node);
+            return;
+          }
+          // Reconstruct section element with appropriate borders
+          var outer = document.createElement('div');
+          outer.className = '__pd_pv_sec';
+          outer.style.marginBottom = chunk.isLast ? '11px' : '0';
+          if (chunk.hdrEl) outer.appendChild(chunk.hdrEl);
+
+          var bodyDiv = document.createElement('div');
+          bodyDiv.style.cssText = 'border-left:1px solid #d0d0d0;border-right:1px solid #d0d0d0;border-top:none;'
+            + 'border-bottom:' + (chunk.isLast ? '1px solid #d0d0d0' : 'none') + ';'
+            + 'border-radius:' + (chunk.isLast ? '0 0 3px 3px' : '0') + ';'
+            + 'padding:7px 10px;';
+          chunk.rows.forEach(function(r) { bodyDiv.appendChild(r); });
+          if (chunk.tail) bodyDiv.appendChild(chunk.tail);
+          outer.appendChild(bodyDiv);
+          wrap.appendChild(outer);
+        });
+
         if (p === pageGroups.length - 1) wrap.insertAdjacentHTML('beforeend', tailHtml);
         pg.appendChild(wrap);
         return pg;
@@ -806,7 +891,7 @@
       aogTails:   pvgv('__pv_aog') || baseVals.aogTails,
       mxSummary:  baseVals.mxSummary,
       mxDetail:   pvgv('__pv_mx_detail') || baseVals.mxDetail,
-      melNotes:   pvgv('__pv_mel') || '',
+      melNotes:   pvgv('__pv_mel_notes') || pvgv('__pv_mel') || '',
       wfpCount:   baseVals.wfpCount,
       wfpText:    pvgv('__pv_wfp') || baseVals.wfpText,
       tomorrow:   pvgv('__pv_tomorrow') || baseVals.tomorrow,
