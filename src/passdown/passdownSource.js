@@ -192,7 +192,9 @@
       +       '<option value="2" selected>2 days</option>'
       +       '<option value="3">3 days</option>'
       +       '<option value="7">7 days</option>'
+      +       '<option value="custom">Custom…</option>'
       +     '</select>'
+      +     '<input type="number" id="__pd_custom_range" min="1" max="90" placeholder="Enter days…" style="display:none;margin-top:10px;background:rgba(0,0,0,.4);border:1.5px solid rgba(94,185,255,.3);color:#e8f4ff;font-family:'+SANS+';font-size:13px;border-radius:8px;padding:8px 12px;width:100%;outline:none;box-sizing:border-box;">'
       +   '</div>'
       +   '<button id="__pd_fetch_btn" class="pd-btn" style="width:100%;background:'+A+';border:2px solid '+A+';color:#0d1018;padding:14px 24px;font-family:'+SANS+';font-size:15px;font-weight:700;letter-spacing:0.4px;cursor:pointer;border-radius:10px;">Fetch Data →</button>'
       + '</div>'
@@ -204,12 +206,19 @@
       document.getElementById('__pd_custom_date').style.display = this.value === 'custom' ? 'block' : 'none';
     };
 
+    document.getElementById('__pd_range').onchange = function() {
+      document.getElementById('__pd_custom_range').style.display = this.value === 'custom' ? 'block' : 'none';
+    };
+
     document.getElementById('__pd_fetch_btn').onclick = function() {
       var preset = document.getElementById('__pd_preset').value;
       var reportDate = preset === 'custom'
         ? (document.getElementById('__pd_custom_date').value || td)
         : addDays(td, +preset);
-      var rangeDays = +(document.getElementById('__pd_range').value) || 2;
+      var rangeVal = document.getElementById('__pd_range').value;
+      var rangeDays = rangeVal === 'custom'
+        ? (+(document.getElementById('__pd_custom_range').value) || 2)
+        : (+rangeVal || 2);
       var endDate = addDays(reportDate, rangeDays);
       reportDateStr = reportDate;
       endDateStr = endDate;
