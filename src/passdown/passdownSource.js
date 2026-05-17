@@ -781,15 +781,16 @@
 
         while (queue.length) {
           var hdrH = isFirst ? item.hdrEl.offsetHeight + 2 : 0;
-          // If header + first queued item doesn't fit and page isn't empty, start a new page
-          if (curGroup.length && hdrH + queue[0].offsetHeight > rem) closeGroup();
+          var BODY_PAD = 14; // body div padding: 7px top + 7px bottom (not in offsetHeight)
+          var SAFE = 10;     // extra breathing room so overflow:hidden never clips the last row
+          // If header + body overhead + first queued item doesn't fit and page isn't empty, start a new page
+          if (curGroup.length && hdrH + BODY_PAD + queue[0].offsetHeight > rem - SAFE) closeGroup();
 
-          // Collect items from front of queue that fit, reserving 12px at the bottom so
-          // the last row isn't clipped by overflow:hidden on the page div
-          var taken = [], spaceUsed = hdrH;
+          // Collect items from front of queue that fit
+          var taken = [], spaceUsed = hdrH + BODY_PAD;
           for (var qi = 0; qi < queue.length; qi++) {
             var rh = queue[qi].offsetHeight + 1; // +1 for inter-row border
-            if (spaceUsed + rh > rem - 12 && taken.length) break; // stop — but always take at least 1
+            if (spaceUsed + rh > rem - SAFE && taken.length) break; // stop — but always take at least 1
             taken.push(queue[qi]);
             spaceUsed += rh;
           }
